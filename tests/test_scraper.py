@@ -114,6 +114,30 @@ class ScraperTests(unittest.TestCase):
         self.assertEqual(fetch.call_args.kwargs["timeout"], 30)
         response.__exit__.assert_called_once()
 
+    def test_request_omits_requests_default_accept_header(self):
+        session = self.scraper.requests.Session()
+        response = self.response('"numberOfItems":42')
+        prepared_headers = {}
+
+        def prepare_request(url, **kwargs):
+            request = self.scraper.requests.Request(
+                "GET", url, headers=kwargs["headers"]
+            )
+            prepared_headers.update(session.prepare_request(request).headers)
+            return response
+
+        with patch.object(session, "get", side_effect=prepare_request):
+            self.assertEqual(
+                self.scraper.get_data(
+                    "https://example.com", r'"numberOfItems":(\d+)', "", session
+                ),
+                "42",
+            )
+
+        self.assertNotIn("Accept", prepared_headers)
+        self.assertEqual(prepared_headers["Accept-Encoding"], "identity")
+        self.assertIn("Mozilla", prepared_headers["User-Agent"])
+
     def test_request_uses_configured_user_agent(self):
         response = self.response('"numberOfItems":42')
         with patch.object(self.scraper.requests, "get", return_value=response) as fetch:
