@@ -4,6 +4,7 @@ import configparser
 import argparse
 import signal
 import logging
+from pathlib import Path
 from urllib.parse import urlsplit
 from collections import Counter
 from math import ceil
@@ -22,6 +23,9 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/137.0.0.0 Safari/537.36"
 )
+HEALTH_FILE = Path("/tmp/web-metrics-scraper-health")
+HEALTH_UPDATE_INTERVAL = 30
+HEALTH_TIMEOUT = 180
 LOGGER = logging.getLogger(__name__)
 
 
@@ -30,6 +34,21 @@ def source_host(url):
         return urlsplit(url).hostname or "unknown host"
     except ValueError:
         return "invalid URL"
+
+
+def report_health():
+    try:
+        HEALTH_FILE.touch()
+    except OSError as error:
+        LOGGER.warning("Health status update failed (%s)", type(error).__name__)
+
+
+def is_healthy():
+    try:
+        age = time.time() - HEALTH_FILE.stat().st_mtime
+    except OSError:
+        return False
+    return 0 <= age <= HEALTH_TIMEOUT
 
 
 class ScrapingObject:
@@ -323,6 +342,7 @@ def run_scraper(config, objects, interval, http_client=None, write_api=None):
             remaining_requests = request_counts.copy()
             for scraping_object in objects:
                 request_key = (scraping_object.url, scraping_object.user_agent)
+                report_health()
                 try:
                     data = get_data(
                         scraping_object.url,
@@ -376,7 +396,14 @@ def run_scraper(config, objects, interval, http_client=None, write_api=None):
             if now > next_reading:
                 missed_intervals = ceil((now - next_reading) / interval)
                 next_reading += missed_intervals * interval
-            time.sleep(next_reading - now)
+            remaining = next_reading - now
+            while True:
+                report_health()
+                delay = min(max(0, remaining), HEALTH_UPDATE_INTERVAL)
+                time.sleep(delay)
+                remaining -= delay
+                if remaining <= 0:
+                    break
     except KeyboardInterrupt:
         pass
 
@@ -393,10 +420,13 @@ def main(argv=None):
         prog="web-metrics-scraper",
         description="Extract numeric HTTP metrics and write them to InfluxDB.",
     )
-    parser.add_argument(
-        "-c", "--conf", required=True, action="append", help="config file"
-    )
+    parser.add_argument("-c", "--conf", action="append", help="config file")
+    parser.add_argument("--healthcheck", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.healthcheck:
+        return 0 if is_healthy() else 1
+    if not args.conf:
+        parser.error("the following arguments are required: -c/--conf")
     try:
         config, objects, interval = load_config(args.conf)
     except (OSError, ValueError, configparser.Error) as error:
