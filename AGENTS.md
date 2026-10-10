@@ -35,4 +35,5 @@
 - Run `python -m unittest discover -s tests -v` for behavior changes.
 - Run `pre-commit run --all-files` for formatting, lint, security, and workflow checks.
 - For dependency changes, run `python -m pip check` and `python -m pip_audit -r requirements.txt`.
-- For Docker changes, build the image, smoke-test its `--help` command, and run the offline tests inside the image when practical.
+- CI builds the Docker image, smoke-tests `--help`, and runs the offline tests inside the image on pull requests and before publishing releases.
+- Rely on those CI checks for Docker validation. Run the Docker checks locally only to investigate CI failures or workflow changes.

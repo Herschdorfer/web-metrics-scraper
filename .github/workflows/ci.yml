@@ -41,7 +41,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
   docker:
-    name: Build and smoke-test Docker image
+    name: Build, smoke-test, and test Docker image
     needs: checks
     runs-on: ubuntu-latest
     steps:
@@ -63,3 +63,11 @@ jobs:
 
       - name: Check container entry point
         run: docker run --rm web-metrics-scraper:ci --help
+
+      - name: Run offline tests in container
+        run: |
+          docker run --rm \
+            --volume "$PWD:/test-src:ro" \
+            --entrypoint python3 \
+            web-metrics-scraper:ci \
+            -m unittest discover -s /test-src/tests -v
