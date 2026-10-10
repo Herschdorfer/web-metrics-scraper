@@ -67,7 +67,8 @@ jobs:
       - name: Run offline tests in container
         run: |
           docker run --rm \
-            --volume "$PWD:/test-src:ro" \
+            --volume "$PWD/tests:/app/tests:ro" \
+            --volume "$PWD/.config.example:/app/.config.example:ro" \
             --entrypoint python3 \
             web-metrics-scraper:ci \
-            -m unittest discover -s /test-src/tests -v
+            -m unittest discover -s /app/tests -v
