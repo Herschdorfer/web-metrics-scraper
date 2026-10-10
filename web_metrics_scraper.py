@@ -254,6 +254,7 @@ def get_data(
             with transport.get(
                 url,
                 headers={
+                    "Accept": None,
                     "Accept-Encoding": "identity",
                     "User-Agent": user_agent,
                 },
