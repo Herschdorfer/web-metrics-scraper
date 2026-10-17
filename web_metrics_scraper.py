@@ -294,7 +294,17 @@ def get_data(
     elif operation == "mode":
         bucket_size = 50
         frequency = Counter(value // bucket_size * bucket_size for value in values)
-        value = frequency.most_common(1)[0][0] + bucket_size
+        most_common = frequency.most_common(2)
+        if len(most_common) > 1 and most_common[0][1] == most_common[1][1]:
+            return ""
+        bucket = most_common[0][0]
+        value = int(
+            median(
+                value
+                for value in values
+                if value // bucket_size * bucket_size == bucket
+            )
+        )
     elif operation == "max":
         value = max(values)
     else:

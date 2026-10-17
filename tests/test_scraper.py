@@ -51,10 +51,10 @@ class ScraperTests(unittest.TestCase):
             ("average", "10 11", "10"),
             ("median", "30 10 20", "20"),
             ("median", "40 10 30 20", "25"),
-            ("mode", "110 120 130 210", "150"),
+            ("mode", "110 120 130 210", "120"),
             ("min", "0 10", "0"),
             ("max", "0 10", "10"),
-            ("mode", "10 60", "50"),
+            ("mode", "10 60", ""),
         ]
         for operation, content, expected in cases:
             with self.subTest(operation=operation, content=content):
@@ -65,6 +65,35 @@ class ScraperTests(unittest.TestCase):
                         "https://example.com", r"\d+", operation
                     )
                 self.assertEqual(result, expected)
+
+    def test_mode_bucket_medians_and_ties_are_order_independent(self):
+        cases = [
+            ("400 410 449 500", "410"),
+            ("400 401 500", "400"),
+            ("425", "425"),
+            ("0 0 50", "0"),
+            ("399 400 449 450", "424"),
+            ("-50 -49 -1 0", "-49"),
+            ("-50 -49 0", "-49"),
+            ("400 400 450 450", ""),
+            ("400 410 450 460 500", ""),
+            ("400 450 500", ""),
+            ("400 450 450 500 500 500", "500"),
+        ]
+        for content, expected in cases:
+            for ordered_content in (content, " ".join(reversed(content.split()))):
+                with (
+                    self.subTest(content=ordered_content),
+                    patch.object(
+                        self.scraper.requests,
+                        "get",
+                        return_value=self.response(ordered_content),
+                    ),
+                ):
+                    self.assertEqual(
+                        self.scraper.get_data("https://example.com", r"-?\d+", "mode"),
+                        expected,
+                    )
 
     def test_no_matches_skip_every_operation(self):
         for operation in ("", "min", "max", "average", "median", "mode"):

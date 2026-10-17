@@ -136,7 +136,7 @@ The bucket belongs in `[InfluxDB]`, not in a numbered search section.
 | `max` | Largest integer |
 | `average` | Arithmetic mean, truncated toward zero |
 | `median` | Median, truncated toward zero |
-| `mode` | Upper edge of the most common 50-unit bucket. The first bucket wins ties. |
+| `mode` | Median of the values in the most common 50-unit bucket, truncated toward zero. No value when buckets tie for the highest count. |
 
 The interval is a positive number of seconds, defaulting to 3600.
 The global `user_agent` is optional and defaults to the scraper's existing browser-style value.
