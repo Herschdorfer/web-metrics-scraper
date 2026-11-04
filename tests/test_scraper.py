@@ -68,10 +68,17 @@ class ScraperTests(unittest.TestCase):
 
     def test_selected_match_label_is_returned_for_min_and_max(self):
         content = (
-            '<a href="/product/cheap">Cheap</a> € 10 '
-            '<a href="/product/expensive">Expensive</a> € 30'
+            '<a href="/navigation">Navigation</a>'
+            '<li class="offer"><a href="/product/cheap">Cheap</a>'
+            '<span class="price">€ 10</span></li>'
+            '<li class="offer"><a href="/product/expensive">Expensive</a>'
+            '<span class="price">€ 30</span></li>'
         )
-        regex = r'<a href="(?P<label>[^"]+)"[\s\S]*?€\s*(\d+)'
+        regex = (
+            r'<li class="offer"><a href="(?P<label>[^"]+)">'
+            r"(?:(?!</li>)[\s\S])*?"
+            r'<span class="price">€ (\d+)</span></li>'
+        )
         for operation, expected in (
             ("", ("10", "/product/cheap")),
             ("min", ("10", "/product/cheap")),
@@ -525,6 +532,17 @@ class ScraperTests(unittest.TestCase):
         )
         self.assertEqual(search.operation, "")
 
+    def test_configuration_rejects_label_without_value_group(self):
+        with self.assertRaisesRegex(ValueError, "integer value capture"):
+            self.scraper.load_search(
+                "1",
+                {
+                    "url": "https://example.com",
+                    "regex": r"(?P<label>\d+)",
+                    "measurement": "test",
+                },
+            )
+
     def test_search_rejects_invalid_or_credentialed_urls(self):
         credentials = ":".join(["example-user", "dummy-value"])
         urls = [
@@ -729,7 +747,7 @@ class ScraperTests(unittest.TestCase):
         ):
             self.scraper.run_scraper(self.config, self.objects[:1], self.interval)
 
-        self.assertEqual(write.call_args.args[4], "/product/42")
+        self.assertEqual(write.call_args.kwargs["label"], "/product/42")
 
     def test_scheduler_fetches_shared_url_once_per_cycle(self):
         shared_url = "https://example.com/shared"
@@ -866,7 +884,9 @@ class ScraperTests(unittest.TestCase):
         ):
             self.scraper.run_scraper(self.config, self.objects, self.interval)
 
-        write.assert_called_once_with("42", "MetaData_FlatData", self.config, None)
+        write.assert_called_once_with(
+            "42", "MetaData_FlatData", self.config, None, label=None
+        )
         sleep.assert_called_once_with(self.scraper.HEALTH_UPDATE_INTERVAL)
 
     def test_scheduler_continues_after_an_error(self):
@@ -880,7 +900,9 @@ class ScraperTests(unittest.TestCase):
         ):
             self.scraper.run_scraper(self.config, self.objects, self.interval)
 
-        write.assert_called_once_with("42", "MetaData_FlatData", self.config, None)
+        write.assert_called_once_with(
+            "42", "MetaData_FlatData", self.config, None, label=None
+        )
 
     def test_main_exits_cleanly_on_keyboard_interrupt(self):
         with (
@@ -900,7 +922,9 @@ class ScraperTests(unittest.TestCase):
             patch.object(self.scraper.time, "sleep", side_effect=KeyboardInterrupt),
         ):
             self.scraper.run_scraper(self.config, self.objects, self.interval)
-        write.assert_called_once_with("0", "MetaData_HouseData", self.config, None)
+        write.assert_called_once_with(
+            "0", "MetaData_HouseData", self.config, None, label=None
+        )
 
     def test_scheduler_skips_missed_intervals_without_using_wall_clock(self):
         with (

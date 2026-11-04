@@ -140,6 +140,8 @@ def load_search(section, settings, default_user_agent=DEFAULT_USER_AGENT):
     value_groups = [
         group for group in range(1, pattern.groups + 1) if group != label_group
     ]
+    if label_group is not None and not value_groups:
+        raise ValueError(f"Regex in [{section}] must include an integer value capture")
     if len(value_groups) > 1:
         raise ValueError(
             f"Regex in [{section}] must have at most one value capture group"
@@ -415,21 +417,13 @@ def run_scraper(config, objects, interval, http_client=None, write_api=None):
                                 scraping_object.measurement,
                             )
                         else:
-                            if label is None:
-                                write_data(
-                                    data,
-                                    scraping_object.measurement,
-                                    config,
-                                    write_api,
-                                )
-                            else:
-                                write_data(
-                                    data,
-                                    scraping_object.measurement,
-                                    config,
-                                    write_api,
-                                    label,
-                                )
+                            write_data(
+                                data,
+                                scraping_object.measurement,
+                                config,
+                                write_api,
+                                label=label,
+                            )
                             LOGGER.info(
                                 "Wrote measurement %r: %s",
                                 scraping_object.measurement,
