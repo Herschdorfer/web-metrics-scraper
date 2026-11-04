@@ -66,6 +66,37 @@ class ScraperTests(unittest.TestCase):
                     )
                 self.assertEqual(result, expected)
 
+    def test_selected_match_label_is_returned_for_min_and_max(self):
+        content = (
+            '<a href="/product/cheap">Cheap</a> € 10 '
+            '<a href="/product/expensive">Expensive</a> € 30'
+        )
+        regex = r'<a href="(?P<label>[^"]+)"[\s\S]*?€\s*(\d+)'
+        for operation, expected in (
+            ("", ("10", "/product/cheap")),
+            ("min", ("10", "/product/cheap")),
+            ("max", ("30", "/product/expensive")),
+            ("average", ("20", None)),
+        ):
+            with self.subTest(operation=operation):
+                with patch.object(
+                    self.scraper.requests, "get", return_value=self.response(content)
+                ):
+                    result = self.scraper.get_data(
+                        "https://example.com",
+                        regex,
+                        operation,
+                        return_label=True,
+                    )
+                self.assertEqual(result, expected)
+
+        with patch.object(
+            self.scraper.requests, "get", return_value=self.response(content)
+        ):
+            self.assertEqual(
+                self.scraper.get_data("https://example.com", regex, ""), "10"
+            )
+
     def test_mode_bucket_medians_and_ties_are_order_independent(self):
         cases = [
             ("400 410 449 500", "410"),
@@ -472,12 +503,27 @@ class ScraperTests(unittest.TestCase):
             text + "\noperation = unsupported\n",
             text.replace(r'"numberOfItems":(\d+)', "("),
             text.replace(r'"numberOfItems":(\d+)', r"(\d+)(\d+)"),
+            text.replace(
+                r'"numberOfItems":(\d+)',
+                r'(?P<label>[^"]+)(\d+)(\d+)',
+            ),
             "[InfluxDB]\ntoken=t\norg=o\nserver=s\nbucket=b\n",
         ]
         for invalid in cases:
             with self.subTest(config=invalid):
                 with self.assertRaises(ValueError):
                     self.load_settings(invalid)
+
+    def test_configuration_accepts_named_label_and_value_groups(self):
+        search = self.scraper.load_search(
+            "1",
+            {
+                "url": "https://example.com",
+                "regex": r'<a href="(?P<label>[^"]+)">.*?(\d+)',
+                "measurement": "test",
+            },
+        )
+        self.assertEqual(search.operation, "")
 
     def test_search_rejects_invalid_or_credentialed_urls(self):
         credentials = ":".join(["example-user", "dummy-value"])
@@ -637,6 +683,16 @@ class ScraperTests(unittest.TestCase):
             "shared_measurement value=42i",
         )
 
+    def test_influx_write_stores_label_as_a_string_field(self):
+        writer = MagicMock()
+        self.scraper.write_data(
+            "42", "shared_measurement", self.config, writer, "/product/42"
+        )
+        self.assertEqual(
+            writer.write.call_args.kwargs["record"].to_line_protocol(),
+            'shared_measurement label="/product/42",value=42i',
+        )
+
     def test_main_reuses_and_closes_influx_resources(self):
         with (
             patch.object(self.scraper, "create_influx_client") as factory,
@@ -663,6 +719,17 @@ class ScraperTests(unittest.TestCase):
             )
         self.assertEqual(write.call_count, 2)
         self.assertTrue(all(call.args[3] is writer for call in write.call_args_list))
+
+    def test_scheduler_passes_selected_label_to_influx_write(self):
+        with (
+            patch.object(self.scraper, "get_data", return_value=("42", "/product/42")),
+            patch.object(self.scraper, "write_data") as write,
+            patch.object(self.scraper.time, "monotonic", side_effect=[100, 101, 101]),
+            patch.object(self.scraper.time, "sleep", side_effect=KeyboardInterrupt),
+        ):
+            self.scraper.run_scraper(self.config, self.objects[:1], self.interval)
+
+        self.assertEqual(write.call_args.args[4], "/product/42")
 
     def test_scheduler_fetches_shared_url_once_per_cycle(self):
         shared_url = "https://example.com/shared"

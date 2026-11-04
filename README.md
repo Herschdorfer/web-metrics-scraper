@@ -126,7 +126,9 @@ operation = min
 Each numbered section defines a source.
 Required keys are `url`, `regex`, and `measurement`.
 The default `operation` is `min`.
-The regex must produce integer values and may contain zero or one capture group.
+The regex must produce integer values and may contain zero or one value capture group.
+An optional named `label` capture group can identify the selected match when the operation is `min` or `max`, including the default `min`.
+The label is written as a string field alongside `value`, not as a tag.
 `name` is optional descriptive text, not used for processing.
 The bucket belongs in `[InfluxDB]`, not in a numbered search section.
 
