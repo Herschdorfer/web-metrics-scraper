@@ -136,8 +136,16 @@ def load_search(section, settings, default_user_agent=DEFAULT_USER_AGENT):
         pattern = re.compile(settings["regex"])
     except re.error as error:
         raise ValueError(f"Invalid regex in [{section}]: {error}") from error
-    if pattern.groups > 1:
-        raise ValueError(f"Regex in [{section}] must have at most one capture group")
+    label_group = pattern.groupindex.get("label")
+    value_groups = [
+        group for group in range(1, pattern.groups + 1) if group != label_group
+    ]
+    if label_group is not None and not value_groups:
+        raise ValueError(f"Regex in [{section}] must include an integer value capture")
+    if len(value_groups) > 1:
+        raise ValueError(
+            f"Regex in [{section}] must have at most one value capture group"
+        )
     user_agent = validate_user_agent(
         settings.get("user_agent", default_user_agent), f"[{section}] user_agent"
     )
@@ -227,6 +235,7 @@ def get_data(
     http_client=None,
     user_agent=DEFAULT_USER_AGENT,
     response_cache=None,
+    return_label=False,
 ):
     """
     Retrieves data from a given URL using a regular expression.
@@ -240,9 +249,12 @@ def get_data(
         user_agent: User-Agent header value for the request.
         response_cache: Optional per-cycle cache of response bodies by URL and
             User-Agent.
+        return_label: Return the selected match's label with the value.
 
     Returns:
-        str: The integer aggregate, or an empty string when there is no usable data.
+        str or tuple: The integer aggregate, or an empty string when there is no
+            usable data. When return_label is true, the result also includes the
+            selected match's label.
     """
     cache_key = (url, user_agent)
     if response_cache is not None and cache_key in response_cache:
@@ -274,20 +286,56 @@ def get_data(
         if response_cache is not None:
             response_cache[cache_key] = content
     if content is None:
-        return ""
+        return ("", None) if return_label else ""
 
-    matches = re.findall(regex, content)
+    pattern = re.compile(regex)
+    label_group = pattern.groupindex.get("label")
+    value_groups = [
+        group for group in range(1, pattern.groups + 1) if group != label_group
+    ]
+    value_group = value_groups[0] if value_groups else 0
+    is_max = operation == "max"
+    is_min = operation not in ("average", "median", "mode", "max")
+    is_extremum = is_min or is_max
+    values = None if is_extremum else []
+    selected_value = None
+    selected_label = None
+    match_count = 0
+    for match in pattern.finditer(content):
+        match_count += 1
+        try:
+            current_value = int(match.group(value_group))
+        except (TypeError, ValueError):
+            LOGGER.debug(
+                "Matched %d values from %s using %r",
+                match_count,
+                source_host(url),
+                operation,
+            )
+            LOGGER.warning("Non-integer matches from %s", source_host(url))
+            return ("", None) if return_label else ""
+        if is_extremum:
+            if (
+                selected_value is None
+                or (is_max and current_value > selected_value)
+                or (is_min and current_value < selected_value)
+            ):
+                selected_value = current_value
+                if return_label and label_group is not None:
+                    selected_label = match.group("label")
+        else:
+            values.append(current_value)
     LOGGER.debug(
-        "Matched %d values from %s using %r", len(matches), source_host(url), operation
+        "Matched %d values from %s using %r",
+        match_count,
+        source_host(url),
+        operation,
     )
-    if not matches:
-        return ""
-    try:
-        values = [int(match) for match in matches]
-    except (TypeError, ValueError):
-        LOGGER.warning("Non-integer matches from %s", source_host(url))
-        return ""
-    if operation == "average":
+    if not match_count:
+        return ("", None) if return_label else ""
+    if is_extremum:
+        value = selected_value
+    elif operation == "average":
         value = int(mean(values))
     elif operation == "median":
         value = int(median(values))
@@ -296,7 +344,7 @@ def get_data(
         frequency = Counter(value // bucket_size * bucket_size for value in values)
         most_common = frequency.most_common(2)
         if len(most_common) > 1 and most_common[0][1] == most_common[1][1]:
-            return ""
+            return ("", None) if return_label else ""
         bucket = most_common[0][0]
         value = int(
             median(
@@ -305,14 +353,10 @@ def get_data(
                 if value // bucket_size * bucket_size == bucket
             )
         )
-    elif operation == "max":
-        value = max(values)
-    else:
-        value = min(values)
     data = str(value)
     LOGGER.debug("Aggregate from %s: %s", source_host(url), data)
 
-    return data
+    return (data, selected_label) if return_label else data
 
 
 def create_influx_client(config):
@@ -322,7 +366,7 @@ def create_influx_client(config):
     )
 
 
-def write_data(data, measurement, config, write_api=None):
+def write_data(data, measurement, config, write_api=None, label=None):
     """
     Writes data to InfluxDB.
 
@@ -332,12 +376,15 @@ def write_data(data, measurement, config, write_api=None):
         config: The loaded InfluxDB connection and bucket settings.
         write_api: Optional shared synchronous writer. A temporary client is used
             when omitted.
+        label: Optional string field for the selected match.
 
     Returns:
         None
     """
     bucket = config["InfluxDB"]["bucket"]
     point = Point(measurement).field("value", int(data))
+    if label is not None:
+        point = point.field("label", label)
     if write_api is not None:
         write_api.write(bucket=bucket, record=point)
         return
@@ -365,7 +412,12 @@ def run_scraper(config, objects, interval, http_client=None, write_api=None):
                         response_cache=(
                             response_cache if request_counts[request_key] > 1 else None
                         ),
+                        return_label=True,
                     )
+                    if isinstance(data, tuple):
+                        data, label = data
+                    else:
+                        label = None
 
                     if data:
                         value = int(data)
@@ -385,7 +437,11 @@ def run_scraper(config, objects, interval, http_client=None, write_api=None):
                             )
                         else:
                             write_data(
-                                data, scraping_object.measurement, config, write_api
+                                data,
+                                scraping_object.measurement,
+                                config,
+                                write_api,
+                                label=label,
                             )
                             LOGGER.info(
                                 "Wrote measurement %r: %s",

@@ -126,7 +126,17 @@ operation = min
 Each numbered section defines a source.
 Required keys are `url`, `regex`, and `measurement`.
 The default `operation` is `min`.
-The regex must produce integer values and may contain zero or one capture group.
+The regex must produce integer values and may contain zero or one value capture group.
+An optional named `label` capture group can identify the selected match when the operation is `min` or `max`, including the default `min`.
+When using `label`, include one separate value capture group.
+The label is written as a string field alongside `value`, not as a tag.
+For example, if each offer is contained in an `<li class="offer">` element:
+
+```ini
+regex = <li class="offer"><a href="(?P<label>[^"]+)">(?:(?!</li>)[\s\S])*?<span class="price">€ (\d+)</span></li>
+```
+
+Replace `li.offer` and the inner markup with the wrapper and structure used by the source page.
 `name` is optional descriptive text, not used for processing.
 The bucket belongs in `[InfluxDB]`, not in a numbered search section.
 
