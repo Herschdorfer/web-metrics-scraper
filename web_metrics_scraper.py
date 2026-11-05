@@ -289,24 +289,53 @@ def get_data(
         return ("", None) if return_label else ""
 
     pattern = re.compile(regex)
-    matches = list(pattern.finditer(content))
-    LOGGER.debug(
-        "Matched %d values from %s using %r", len(matches), source_host(url), operation
-    )
-    if not matches:
-        return ("", None) if return_label else ""
     label_group = pattern.groupindex.get("label")
     value_groups = [
         group for group in range(1, pattern.groups + 1) if group != label_group
     ]
     value_group = value_groups[0] if value_groups else 0
-    try:
-        values = [int(match.group(value_group)) for match in matches]
-    except (TypeError, ValueError):
-        LOGGER.warning("Non-integer matches from %s", source_host(url))
-        return ("", None) if return_label else ""
+    is_max = operation == "max"
+    is_min = operation not in ("average", "median", "mode", "max")
+    is_extremum = is_min or is_max
+    values = None if is_extremum else []
+    selected_value = None
     selected_label = None
-    if operation == "average":
+    match_count = 0
+    for match in pattern.finditer(content):
+        match_count += 1
+        try:
+            current_value = int(match.group(value_group))
+        except (TypeError, ValueError):
+            LOGGER.debug(
+                "Matched %d values from %s using %r",
+                match_count,
+                source_host(url),
+                operation,
+            )
+            LOGGER.warning("Non-integer matches from %s", source_host(url))
+            return ("", None) if return_label else ""
+        if is_extremum:
+            if (
+                selected_value is None
+                or (is_max and current_value > selected_value)
+                or (is_min and current_value < selected_value)
+            ):
+                selected_value = current_value
+                if return_label and label_group is not None:
+                    selected_label = match.group("label")
+        else:
+            values.append(current_value)
+    LOGGER.debug(
+        "Matched %d values from %s using %r",
+        match_count,
+        source_host(url),
+        operation,
+    )
+    if not match_count:
+        return ("", None) if return_label else ""
+    if is_extremum:
+        value = selected_value
+    elif operation == "average":
         value = int(mean(values))
     elif operation == "median":
         value = int(median(values))
@@ -324,16 +353,6 @@ def get_data(
                 if value // bucket_size * bucket_size == bucket
             )
         )
-    elif operation == "max":
-        selected_index = max(range(len(values)), key=values.__getitem__)
-        value = values[selected_index]
-        if label_group is not None:
-            selected_label = matches[selected_index].group("label")
-    else:
-        selected_index = min(range(len(values)), key=values.__getitem__)
-        value = values[selected_index]
-        if label_group is not None:
-            selected_label = matches[selected_index].group("label")
     data = str(value)
     LOGGER.debug("Aggregate from %s: %s", source_host(url), data)
 

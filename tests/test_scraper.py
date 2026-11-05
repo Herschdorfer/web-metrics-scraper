@@ -104,6 +104,48 @@ class ScraperTests(unittest.TestCase):
                 self.scraper.get_data("https://example.com", regex, ""), "10"
             )
 
+    def test_regex_matches_are_consumed_incrementally(self):
+        class Match:
+            def __init__(self, label, value):
+                self.groups = {1: label, 2: value, "label": label}
+                self.accessed = False
+
+            def group(self, group):
+                self.accessed = True
+                return self.groups[group]
+
+        class Pattern:
+            groupindex = {"label": 1}
+            groups = 2
+
+            def finditer(self, _content):
+                matches = [Match("/first", "10"), Match("/second", "30")]
+
+                def iterate():
+                    previous = None
+                    for match in matches:
+                        if previous is not None and not previous.accessed:
+                            raise AssertionError("match was retained before processing")
+                        previous = match
+                        yield match
+
+                return iterate()
+
+        with (
+            patch.object(self.scraper.re, "compile", return_value=Pattern()),
+            patch.object(
+                self.scraper.requests, "get", return_value=self.response("ignored")
+            ),
+        ):
+            result = self.scraper.get_data(
+                "https://example.com",
+                r"(?P<label>[^ ]+) (\d+)",
+                "max",
+                return_label=True,
+            )
+
+        self.assertEqual(result, ("30", "/second"))
+
     def test_mode_bucket_medians_and_ties_are_order_independent(self):
         cases = [
             ("400 410 449 500", "410"),
