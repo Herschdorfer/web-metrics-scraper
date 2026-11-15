@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 LABEL org.opencontainers.image.title="web-metrics-scraper" \
 	org.opencontainers.image.description="Configurable HTTP metrics scraper with InfluxDB output" \
